@@ -1,0 +1,8 @@
+# Performance Tests
+
+This directory will contain performance tests for:
+- Latency measurements (input lag, round-trip time)
+- Load testing (concurrent players, simultaneous games)
+- Client performance (FPS, memory usage)
+
+Uses load testing tools (k6/Artillery) and custom benchmarks.

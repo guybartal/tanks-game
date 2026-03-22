@@ -1,0 +1,5 @@
+{
+  "universes_enabled": ["simpsons"],
+  "default_capacity": 12,
+  "overflow_strategy": "diegetic_expansion"
+}

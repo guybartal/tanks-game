@@ -1,0 +1,8 @@
+# Unit Tests
+
+This directory will contain unit tests for:
+- Game logic (tank movement, projectiles, collisions)
+- State management (player state, game state)
+- Utility functions
+
+Tests will be co-located with source code OR centralized here based on team preference.

@@ -1,0 +1,11 @@
+{
+  "assignments": [
+    {
+      "assignment_id": "tanks-simpsons-001",
+      "universe": "simpsons",
+      "created_at": "2026-03-22T09:32:55Z",
+      "agents": ["Homer", "Bart", "Lisa", "Milhouse"],
+      "reason": "User requested Simpsons universe for multiplayer tanks game"
+    }
+  ]
+}

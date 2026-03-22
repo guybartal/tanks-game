@@ -1,0 +1,8 @@
+# End-to-End Tests
+
+This directory will contain E2E tests for:
+- Complete player journeys (signup → play → leaderboard)
+- Full game flows (matchmaking → gameplay → results)
+- Cross-browser and mobile device testing
+
+Uses browser automation (Playwright/Cypress).
