@@ -98,22 +98,23 @@ export class GameRoom extends Room<TanksRoomOptions> {
 
     const deltaTime = 1 / GAME_CONFIG.TICK_RATE;
 
-    // Handle rotation
-    if (input.left) {
-      player.rotation -= GAME_CONFIG.TANK_ROTATION_SPEED * deltaTime;
-    }
-    if (input.right) {
-      player.rotation += GAME_CONFIG.TANK_ROTATION_SPEED * deltaTime;
-    }
+    // XY-axis movement (WASD maps to screen directions)
+    let dx = 0;
+    let dy = 0;
+    if (input.left) dx -= 1;
+    if (input.right) dx += 1;
+    if (input.forward) dy -= 1;
+    if (input.backward) dy += 1;
 
-    // Handle movement
-    if (input.forward) {
-      player.x += Math.cos(player.rotation) * GAME_CONFIG.PLAYER_SPEED * deltaTime;
-      player.y += Math.sin(player.rotation) * GAME_CONFIG.PLAYER_SPEED * deltaTime;
-    }
-    if (input.backward) {
-      player.x -= Math.cos(player.rotation) * GAME_CONFIG.PLAYER_SPEED * deltaTime * 0.5;
-      player.y -= Math.sin(player.rotation) * GAME_CONFIG.PLAYER_SPEED * deltaTime * 0.5;
+    // Normalize diagonal movement
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 0) {
+      dx /= len;
+      dy /= len;
+      player.x += dx * GAME_CONFIG.PLAYER_SPEED * deltaTime;
+      player.y += dy * GAME_CONFIG.PLAYER_SPEED * deltaTime;
+      // Rotate body toward movement direction
+      player.rotation = Math.atan2(dy, dx);
     }
 
     // Clamp to arena bounds

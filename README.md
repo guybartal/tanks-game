@@ -131,6 +131,28 @@ tanks/
 3. **Fire** — Click or press Space to shoot
 4. **Objective** — Destroy enemy tanks and survive!
 
+## Running in Kubernetes (Kind)
+
+Requires: Docker, Kind, kubectl.
+
+```bash
+# Build images
+docker build -t tanks-server:local ./server
+docker build -t tanks-client:local --build-arg VITE_SERVER_URL=ws://localhost:30300 ./client
+
+# Load into Kind cluster
+kind load docker-image tanks-server:local tanks-client:local --name <cluster-name>
+
+# Deploy
+kubectl apply -f k8s/tanks.yaml
+
+# Port-forward
+kubectl port-forward -n tanks svc/tanks-server 30300:3000 &
+kubectl port-forward -n tanks svc/tanks-client 30080:80 &
+```
+
+Open http://localhost:30080.
+
 ## Architecture
 
 For detailed technical architecture including system components, data flow, and deployment considerations, see [ARCHITECTURE.md](./ARCHITECTURE.md).

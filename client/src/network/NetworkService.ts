@@ -1,4 +1,4 @@
-import { Client, Room } from 'colyseus.js';
+import { Client, Room, getStateCallbacks } from '@colyseus/sdk';
 
 // Types matching server schema
 export interface PlayerState {
@@ -91,44 +91,39 @@ class NetworkService {
   private setupStateListeners(): void {
     if (!this.room) return;
 
-    // Listen for player additions
+    const $ = getStateCallbacks(this.room);
+
+    // Access callbacks via the proxy chain: $(room.state).property
+    // (room.state.players is undefined until first sync)
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.room.state.players.onAdd((player: any, sessionId: string) => {
+    ($(this.room.state) as any).players.onAdd((player: any, sessionId: string) => {
       console.log('Player joined:', sessionId, player.name);
       this.listeners.onPlayerJoin?.(player as PlayerState);
 
-      // Listen for changes on this player
-      player.onChange?.(() => {
+      $(player).onChange(() => {
         this.listeners.onPlayerUpdate?.(player as PlayerState);
       });
-    });
+    }, true);
 
-    // Listen for player removals
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.room.state.players.onRemove((_player: any, sessionId: string) => {
+    ($(this.room.state) as any).players.onRemove((_player: any, sessionId: string) => {
       console.log('Player left:', sessionId);
       this.listeners.onPlayerLeave?.(sessionId);
     });
 
-    // Listen for bullet additions
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.room.state.bullets.onAdd((bullet: any, bulletId: string) => {
+    ($(this.room.state) as any).bullets.onAdd((bullet: any, bulletId: string) => {
       console.log('Bullet fired:', bulletId);
       this.listeners.onBulletAdd?.(bullet as BulletState);
+    }, true);
 
-      bullet.onChange?.(() => {
-        // Bullets update position via state sync
-      });
-    });
-
-    // Listen for bullet removals
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.room.state.bullets.onRemove((_bullet: any, bulletId: string) => {
+    ($(this.room.state) as any).bullets.onRemove((_bullet: any, bulletId: string) => {
       this.listeners.onBulletRemove?.(bulletId);
     });
 
-    // General state change
-    this.room.state.onChange(() => {
+    $(this.room.state).onChange(() => {
       const state: GameStateData = {
         players: this.room!.state.players,
         bullets: this.room!.state.bullets,

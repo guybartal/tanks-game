@@ -69,6 +69,10 @@ export class Tank extends Phaser.GameObjects.Container {
     this.targetAngle = angle;
   }
 
+  setBodyRotation(angle: number): void {
+    this.tankBody.rotation = angle;
+  }
+
   aimAt(worldX: number, worldY: number): void {
     const angle = Phaser.Math.Angle.Between(this.x, this.y, worldX, worldY);
     this.targetAngle = angle;
@@ -134,6 +138,6 @@ export class Tank extends Phaser.GameObjects.Container {
   }
 
   getTurretAngle(): number {
-    return this.turret.rotation;
+    return this.targetAngle;
   }
 }

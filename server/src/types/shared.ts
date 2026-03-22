@@ -25,8 +25,8 @@ export const GAME_CONFIG = {
   BULLET_DAMAGE: 25,
   RESPAWN_TIME: 3000, // Milliseconds
   MAX_PLAYERS_PER_ROOM: 8,
-  ARENA_WIDTH: 1600,
-  ARENA_HEIGHT: 1200,
+  ARENA_WIDTH: 1280,
+  ARENA_HEIGHT: 720,
 } as const;
 
 // Message types for Colyseus communication

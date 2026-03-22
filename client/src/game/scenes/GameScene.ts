@@ -10,6 +10,7 @@ export class GameScene extends Phaser.Scene {
   private remoteTanks: Map<string, RemoteTank> = new Map();
   private serverBullets: Map<string, ServerBullet> = new Map();
   private isMultiplayer = false;
+  private pendingSpawn: { x: number; y: number } | null = null;
   
   // Input
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -27,6 +28,8 @@ export class GameScene extends Phaser.Scene {
   private fireButton!: Phaser.GameObjects.Image;
   private joystickActive = false;
   private joystickPointer: Phaser.Input.Pointer | null = null;
+  private joystickInputX = 0;
+  private joystickInputY = 0;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -38,7 +41,7 @@ export class GameScene extends Phaser.Scene {
     this.setupMobileControls();
     
     // Debug text
-    this.add.text(10, 10, 'WASD/Arrows: Move | Mouse: Aim | Click: Fire', {
+    this.add.text(10, 10, 'WASD/Arrows: Move | Mouse: Aim | Click/Space: Fire', {
       font: '14px monospace',
       color: '#9ca3af',
     });
@@ -72,8 +75,12 @@ export class GameScene extends Phaser.Scene {
       this.isMultiplayer = true;
       statusText.destroy();
       
-      // Create local player tank
+      // Create local player tank at server's spawn position
       this.createPlayer();
+      if (this.pendingSpawn) {
+        this.player.setPosition(this.pendingSpawn.x, this.pendingSpawn.y);
+        this.pendingSpawn = null;
+      }
       
     } catch (error) {
       console.error('Failed to connect:', error);
@@ -91,6 +98,8 @@ export class GameScene extends Phaser.Scene {
       console.log('Local player joined, updating position');
       if (this.player) {
         this.player.setPosition(player.x, player.y);
+      } else {
+        this.pendingSpawn = { x: player.x, y: player.y };
       }
       return;
     }
@@ -287,6 +296,8 @@ export class GameScene extends Phaser.Scene {
       if (pointer === this.joystickPointer) {
         this.joystickActive = false;
         this.joystickPointer = null;
+        this.joystickInputX = 0;
+        this.joystickInputY = 0;
         this.resetJoystick();
         if (this.player) {
           this.player.setMoveInput(0, 0);
@@ -349,8 +360,12 @@ export class GameScene extends Phaser.Scene {
     // Dead zone
     const deadZone = 0.15;
     if (Math.abs(inputX) < deadZone && Math.abs(inputY) < deadZone) {
+      this.joystickInputX = 0;
+      this.joystickInputY = 0;
       if (this.player) this.player.setMoveInput(0, 0);
     } else {
+      this.joystickInputX = inputX;
+      this.joystickInputY = inputY;
       if (this.player) this.player.setMoveInput(inputX, inputY);
     }
   }
@@ -362,6 +377,14 @@ export class GameScene extends Phaser.Scene {
     this.joystickKnob.y = centerY;
   }
 
+  private getJoystickX(): number {
+    return this.joystickInputX;
+  }
+
+  private getJoystickY(): number {
+    return this.joystickInputY;
+  }
+
   update(_time: number, delta: number): void {
     if (!this.player) return;
     
@@ -371,15 +394,38 @@ export class GameScene extends Phaser.Scene {
     // Send input to server if multiplayer
     if (this.isMultiplayer) {
       this.sendInputToServer();
+      this.syncFromServer();
     }
     
-    // Update remote tanks
+    // Update remote tanks (lerp towards targets)
     this.remoteTanks.forEach((tank) => {
       tank.update(delta);
     });
     
     // Update server bullets
     this.updateServerBullets();
+  }
+
+  private syncFromServer(): void {
+    const players = networkService.getPlayers();
+    if (!players) return;
+
+    players.forEach((player: PlayerState, sessionId: string) => {
+      if (sessionId === networkService.sessionId) {
+        // Sync local player to server-authoritative position
+        this.player.setPosition(player.x, player.y);
+        this.player.setBodyRotation(player.rotation);
+        return;
+      }
+      const remoteTank = this.remoteTanks.get(sessionId);
+      if (remoteTank) {
+        remoteTank.updateFromServer(
+          player.x, player.y,
+          player.rotation, player.turretRotation,
+          player.health, player.isAlive
+        );
+      }
+    });
   }
 
   private sendInputToServer(): void {
@@ -389,22 +435,27 @@ export class GameScene extends Phaser.Scene {
     let left = false;
     let right = false;
     
-    if (!this.joystickActive) {
-      // Keyboard input - map WASD to tank controls
-      const upPressed = this.wasd.W.isDown || this.cursors.up.isDown;
-      const downPressed = this.wasd.S.isDown || this.cursors.down.isDown;
-      const leftPressed = this.wasd.A.isDown || this.cursors.left.isDown;
-      const rightPressed = this.wasd.D.isDown || this.cursors.right.isDown;
-      
-      forward = upPressed;
-      backward = downPressed;
-      left = leftPressed;
-      right = rightPressed;
+    if (this.joystickActive) {
+      // Convert joystick analog input to digital directions
+      const jx = this.getJoystickX();
+      const jy = this.getJoystickY();
+      const deadZone = 0.15;
+      left = jx < -deadZone;
+      right = jx > deadZone;
+      forward = jy < -deadZone;
+      backward = jy > deadZone;
+    } else {
+      // Keyboard input
+      forward = this.wasd.W.isDown || this.cursors.up.isDown;
+      backward = this.wasd.S.isDown || this.cursors.down.isDown;
+      left = this.wasd.A.isDown || this.cursors.left.isDown;
+      right = this.wasd.D.isDown || this.cursors.right.isDown;
     }
     
-    // Check for fire input (mouse click or fire button)
-    const fire = this.input.activePointer.isDown && 
-      (!this.isMobile || this.isFireAreaPointer(this.input.activePointer));
+    // Check for fire input (mouse click, space bar, or fire button)
+    const pointerFire = this.input.activePointer.isDown &&
+      (!this.joystickActive || this.isFireAreaPointer(this.input.activePointer));
+    const fire = this.cursors.space.isDown || pointerFire;
     
     // Get turret rotation
     const turretRotation = this.player.getTurretAngle();
@@ -435,11 +486,12 @@ export class GameScene extends Phaser.Scene {
 
   private handleKeyboardInput(): void {
     if (this.joystickActive) return; // Mobile overrides keyboard
+    // In multiplayer, movement is server-authoritative (syncFromServer handles position)
+    if (this.isMultiplayer) return;
     
     let moveX = 0;
     let moveY = 0;
     
-    // WASD for local visual feedback (server is authoritative)
     if (this.wasd.A.isDown || this.cursors.left.isDown) moveX -= 1;
     if (this.wasd.D.isDown || this.cursors.right.isDown) moveX += 1;
     if (this.wasd.W.isDown || this.cursors.up.isDown) moveY -= 1;
