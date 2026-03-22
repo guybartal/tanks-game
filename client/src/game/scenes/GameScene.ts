@@ -1,11 +1,15 @@
 import Phaser from 'phaser';
 import { Tank } from '../entities/Tank';
-import { Bullet } from '../entities/Bullet';
+import { RemoteTank } from '../entities/RemoteTank';
+import { ServerBullet } from '../entities/ServerBullet';
 import { GAME_WIDTH, GAME_HEIGHT } from '../config';
+import { networkService, type PlayerState, type BulletState } from '../../network';
 
 export class GameScene extends Phaser.Scene {
   private player!: Tank;
-  private bullets!: Phaser.Physics.Arcade.Group;
+  private remoteTanks: Map<string, RemoteTank> = new Map();
+  private serverBullets: Map<string, ServerBullet> = new Map();
+  private isMultiplayer = false;
   
   // Input
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -28,10 +32,8 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
   }
 
-  create(): void {
+  async create(): Promise<void> {
     this.createArena();
-    this.createPlayer();
-    this.createBulletGroup();
     this.setupInput();
     this.setupMobileControls();
     
@@ -40,6 +42,139 @@ export class GameScene extends Phaser.Scene {
       font: '14px monospace',
       color: '#9ca3af',
     });
+
+    // Connect to multiplayer server
+    await this.connectToServer();
+  }
+
+  private async connectToServer(): Promise<void> {
+    const statusText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Connecting...', {
+      font: '24px monospace',
+      color: '#ffffff',
+    }).setOrigin(0.5);
+
+    try {
+      // Setup network event listeners
+      networkService.setListeners({
+        onPlayerJoin: (player: PlayerState) => this.handlePlayerJoin(player),
+        onPlayerLeave: (playerId: string) => this.handlePlayerLeave(playerId),
+        onPlayerUpdate: (player: PlayerState) => this.handlePlayerUpdate(player),
+        onBulletAdd: (bullet: BulletState) => this.handleBulletAdd(bullet),
+        onBulletRemove: (bulletId: string) => this.handleBulletRemove(bulletId),
+        onPlayerKilled: (data) => this.handlePlayerKilled(data),
+        onPlayerRespawned: (data) => this.handlePlayerRespawned(data),
+      });
+
+      // Connect to server
+      const serverUrl = import.meta.env.VITE_SERVER_URL || 'ws://localhost:3000';
+      await networkService.connect(serverUrl);
+      
+      this.isMultiplayer = true;
+      statusText.destroy();
+      
+      // Create local player tank
+      this.createPlayer();
+      
+    } catch (error) {
+      console.error('Failed to connect:', error);
+      statusText.setText('Connection failed - Playing offline');
+      this.time.delayedCall(2000, () => {
+        statusText.destroy();
+        this.createPlayer();
+      });
+    }
+  }
+
+  private handlePlayerJoin(player: PlayerState): void {
+    // Don't create a remote tank for ourselves
+    if (player.id === networkService.sessionId) {
+      console.log('Local player joined, updating position');
+      if (this.player) {
+        this.player.setPosition(player.x, player.y);
+      }
+      return;
+    }
+
+    console.log('Remote player joined:', player.name);
+    
+    // Create remote tank for new player
+    const remoteTank = new RemoteTank({
+      scene: this,
+      x: player.x,
+      y: player.y,
+      playerId: player.id,
+      playerName: player.name,
+    });
+    
+    this.remoteTanks.set(player.id, remoteTank);
+  }
+
+  private handlePlayerLeave(playerId: string): void {
+    const remoteTank = this.remoteTanks.get(playerId);
+    if (remoteTank) {
+      remoteTank.destroy();
+      this.remoteTanks.delete(playerId);
+    }
+  }
+
+  private handlePlayerUpdate(player: PlayerState): void {
+    // Update remote tank
+    const remoteTank = this.remoteTanks.get(player.id);
+    if (remoteTank) {
+      remoteTank.updateFromServer(
+        player.x,
+        player.y,
+        player.rotation,
+        player.turretRotation,
+        player.health,
+        player.isAlive
+      );
+    }
+  }
+
+  private handleBulletAdd(bullet: BulletState): void {
+    const serverBullet = new ServerBullet({
+      scene: this,
+      x: bullet.x,
+      y: bullet.y,
+      bulletId: bullet.id,
+      ownerId: bullet.ownerId,
+    });
+    
+    this.serverBullets.set(bullet.id, serverBullet);
+  }
+
+  private handleBulletRemove(bulletId: string): void {
+    const serverBullet = this.serverBullets.get(bulletId);
+    if (serverBullet) {
+      serverBullet.destroy();
+      this.serverBullets.delete(bulletId);
+    }
+  }
+
+  private handlePlayerKilled(data: { killedId: string; killedName: string; killerId: string; killerName: string }): void {
+    // Show kill notification
+    const text = `${data.killerName} killed ${data.killedName}`;
+    const notification = this.add.text(GAME_WIDTH / 2, 50, text, {
+      font: '18px monospace',
+      color: '#ef4444',
+      backgroundColor: '#00000088',
+      padding: { x: 10, y: 5 },
+    }).setOrigin(0.5);
+    
+    this.time.delayedCall(2000, () => notification.destroy());
+  }
+
+  private handlePlayerRespawned(data: { playerId: string; playerName: string }): void {
+    const text = `${data.playerName} respawned`;
+    const notification = this.add.text(GAME_WIDTH / 2, 80, text, {
+      font: '14px monospace',
+      color: '#4ade80',
+      backgroundColor: '#00000088',
+      padding: { x: 10, y: 5 },
+    }).setOrigin(0.5);
+    
+    this.time.delayedCall(1500, () => notification.destroy());
   }
 
   private createArena(): void {
@@ -76,13 +211,6 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private createBulletGroup(): void {
-    this.bullets = this.physics.add.group({
-      classType: Bullet,
-      runChildUpdate: true,
-    });
-  }
-
   private setupInput(): void {
     // Keyboard input
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -93,18 +221,14 @@ export class GameScene extends Phaser.Scene {
       D: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
     
-    // Mouse/touch for aiming and firing
+    // Mouse/touch for aiming
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (!this.isMobile || !this.isJoystickPointer(pointer)) {
+      if (this.player && (!this.isMobile || !this.isJoystickPointer(pointer))) {
         this.player.aimAt(pointer.worldX, pointer.worldY);
       }
     });
     
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (!this.isMobile || this.isFireAreaPointer(pointer)) {
-        this.player.fire(this.bullets);
-      }
-    });
+    // Firing is handled in update() via sendInputToServer()
   }
 
   private setupMobileControls(): void {
@@ -153,7 +277,7 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       if (this.joystickActive && pointer === this.joystickPointer) {
         this.updateJoystick(pointer);
-      } else if (this.isFireArea(pointer.x)) {
+      } else if (this.player && this.isFireArea(pointer.x)) {
         // Aim with right side movement
         this.player.aimAt(pointer.worldX, pointer.worldY);
       }
@@ -164,13 +288,14 @@ export class GameScene extends Phaser.Scene {
         this.joystickActive = false;
         this.joystickPointer = null;
         this.resetJoystick();
-        this.player.setMoveInput(0, 0);
+        if (this.player) {
+          this.player.setMoveInput(0, 0);
+        }
       }
     });
     
-    // Fire button
+    // Fire button - in multiplayer, fire is sent via input
     this.fireButton.on('pointerdown', () => {
-      this.player.fire(this.bullets);
       this.fireButton.setScale(0.9);
     });
     
@@ -224,9 +349,9 @@ export class GameScene extends Phaser.Scene {
     // Dead zone
     const deadZone = 0.15;
     if (Math.abs(inputX) < deadZone && Math.abs(inputY) < deadZone) {
-      this.player.setMoveInput(0, 0);
+      if (this.player) this.player.setMoveInput(0, 0);
     } else {
-      this.player.setMoveInput(inputX, inputY);
+      if (this.player) this.player.setMoveInput(inputX, inputY);
     }
   }
 
@@ -238,14 +363,72 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    if (!this.player) return;
+    
     this.handleKeyboardInput();
     this.player.update(delta);
     
-    // Clean up dead bullets
-    this.bullets.getChildren().forEach((bullet) => {
-      const b = bullet as Bullet;
-      if (!b.active) {
-        b.destroy();
+    // Send input to server if multiplayer
+    if (this.isMultiplayer) {
+      this.sendInputToServer();
+    }
+    
+    // Update remote tanks
+    this.remoteTanks.forEach((tank) => {
+      tank.update(delta);
+    });
+    
+    // Update server bullets
+    this.updateServerBullets();
+  }
+
+  private sendInputToServer(): void {
+    // Check keyboard/joystick state for movement
+    let forward = false;
+    let backward = false;
+    let left = false;
+    let right = false;
+    
+    if (!this.joystickActive) {
+      // Keyboard input - map WASD to tank controls
+      const upPressed = this.wasd.W.isDown || this.cursors.up.isDown;
+      const downPressed = this.wasd.S.isDown || this.cursors.down.isDown;
+      const leftPressed = this.wasd.A.isDown || this.cursors.left.isDown;
+      const rightPressed = this.wasd.D.isDown || this.cursors.right.isDown;
+      
+      forward = upPressed;
+      backward = downPressed;
+      left = leftPressed;
+      right = rightPressed;
+    }
+    
+    // Check for fire input (mouse click or fire button)
+    const fire = this.input.activePointer.isDown && 
+      (!this.isMobile || this.isFireAreaPointer(this.input.activePointer));
+    
+    // Get turret rotation
+    const turretRotation = this.player.getTurretAngle();
+    
+    networkService.sendInput({
+      forward,
+      backward,
+      left,
+      right,
+      fire,
+      turretRotation,
+    });
+  }
+
+  private updateServerBullets(): void {
+    const bullets = networkService.getBullets();
+    if (!bullets) return;
+    
+    // Update existing bullets
+    bullets.forEach((bulletState, bulletId) => {
+      const serverBullet = this.serverBullets.get(bulletId);
+      if (serverBullet) {
+        serverBullet.updateFromServer(bulletState.x, bulletState.y);
+        serverBullet.update();
       }
     });
   }
@@ -256,7 +439,7 @@ export class GameScene extends Phaser.Scene {
     let moveX = 0;
     let moveY = 0;
     
-    // WASD
+    // WASD for local visual feedback (server is authoritative)
     if (this.wasd.A.isDown || this.cursors.left.isDown) moveX -= 1;
     if (this.wasd.D.isDown || this.cursors.right.isDown) moveX += 1;
     if (this.wasd.W.isDown || this.cursors.up.isDown) moveY -= 1;

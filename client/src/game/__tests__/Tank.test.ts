@@ -14,7 +14,7 @@ import {
   TANK_ROTATION_SPEED,
   FIRE_COOLDOWN_MS,
   MAX_HEALTH,
-  TankState,
+  type TankState,
 } from '../Tank';
 
 describe('Tank', () => {
