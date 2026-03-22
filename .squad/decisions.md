@@ -85,6 +85,80 @@
 - Performance baseline targets?
 **Needs Input:** Framework selections from Homer (CI/CD) and Lisa/Bart (client/server preferences)
 
+### 2026-03-22: Phaser 3 Game Engine Architecture
+**By:** Bart (Frontend Dev)  
+**Date:** 2026-03-22  
+**Status:** Implemented
+**What:**
+- Implemented Phaser 3 game engine with scene pattern (BootScene → GameScene)
+- Entity pattern: Tank and Bullet as classes extending Phaser objects
+- Dual input system: Keyboard + mouse (desktop), virtual joystick + tap (mobile)
+- Canvas: 1280x720 with Phaser.Scale.FIT for responsive scaling
+- Physics: Arcade physics with acceleration/deceleration
+**Why:**
+- Scene pattern organizes code and enables state transitions
+- Procedural textures avoid asset loading complexity for MVP
+- Dual input ensures mobile-first without breaking desktop
+- Container-based Tank allows independent body/turret rotation
+**Key Details:**
+- Tank uses Phaser Container with child Images for body and turret
+- React integration via useRef prevents double-init in StrictMode
+- Mobile detection via touch events, maxTouchPoints, viewport width
+**Impact:** Lisa syncs tank positions via Colyseus events; future multiplayer state management
+
+### 2026-03-22: Colyseus Game Server Architecture
+**Date:** 2026-03-22  
+**By:** Lisa (Backend Dev)  
+**Status:** Implemented
+**What:**
+- Added Colyseus 0.17.x as authoritative game server
+- Dual server: Express (port 3001, REST + matchmaking) + Colyseus (port 2567, WebSocket)
+- 60Hz tick rate for deterministic gameplay
+- Schema-based state serialization with delta sync
+- Room lifecycle management with built-in matchmaking
+**Why:**
+- Colyseus handles WebSocket complexity (reconnection, fallbacks, rooms)
+- Schema-based sync: only changed properties sent (binary serialization)
+- 60 ticks/second ensures smooth client prediction and reconciliation
+- Purpose-built for games vs. generic Socket.io
+**Key Patterns:**
+- GameRoom extends Room<{ state?: GameState }>
+- Schema properties use @type() decorators for sync
+- Matchmaking via matchMaker.query() and matchMaker.createRoom()
+- Game loop via setInterval in onCreate(), cleanup in onDispose()
+**Files:**
+- server/src/index.ts — Dual server setup
+- server/src/game/GameRoom.ts — Main room with 60Hz loop
+- server/src/game/{GameState,Player,Bullet}.ts — Colyseus schemas
+- server/src/types/shared.ts — Shared client/server constants
+**Impact:** Bart connects to ws://localhost:2567 with Colyseus client; client installs colyseus.js
+
+### 2026-03-22: Vitest as Test Framework
+**Date:** 2026-03-22
+**By:** Milhouse (Tester)
+**Status:** Implemented
+**What:**
+- Vitest for both client and server tests
+- Server: vitest with node environment (36 tests, GameState/Player/Bullet)
+- Client: vitest with jsdom environment + @testing-library/react (39 tests, Tank/input/firing)
+- Unified root package.json with npm test runner
+**Why:**
+- Native Vite integration — Client already uses Vite; zero config for transforms
+- Native ESM — Works with project's ES module setup
+- TypeScript first — No babel config needed
+- Fast — Vite's transform pipeline makes tests run quickly
+- Jest-compatible API — Familiar describe/it/expect syntax
+**Configuration:**
+- server/vitest.config.ts — node environment
+- client/vitest.config.ts — jsdom + React plugin
+- Root package.json — npm test runs both suites
+**Patterns:**
+- Tests co-located: src/**/__tests__/*.test.ts
+- beforeEach for state reset
+- toBeCloseTo() for floating-point comparisons (rotation math)
+- Boundary testing for collision radii and out-of-bounds scenarios
+**Impact:** CI/CD runs tests on every PR; 75 tests provide baseline coverage
+
 ## Governance
 
 - All meaningful changes require team consensus

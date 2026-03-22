@@ -1,0 +1,16 @@
+{
+  "name": "tanks-monorepo",
+  "version": "1.0.0",
+  "description": "Multiplayer Tanks Web Game",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:client && npm run test:server",
+    "test:client": "cd client && npm test",
+    "test:server": "cd server && npm test",
+    "test:watch:client": "cd client && npm run test:watch",
+    "test:watch:server": "cd server && npm run test:watch"
+  },
+  "keywords": ["tanks", "multiplayer", "game"],
+  "author": "",
+  "license": "ISC"
+}

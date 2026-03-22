@@ -26,3 +26,9 @@
 - **Features:** Real-time multiplayer, leaderboards, community
 - **User:** Guy Bertental
 - **Created:** 2026-03-22
+
+## Issue Source
+
+- **Repository:** guybartal/tanks-game
+- **URL:** https://github.com/guybartal/tanks-game
+- **Connected:** 2026-03-22
