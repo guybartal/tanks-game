@@ -1,0 +1,117 @@
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  AZURE_RESOURCE_GROUP: tanks-rg
+  ACR_NAME: ${{ secrets.ACR_NAME }}
+  SERVER_APP_NAME: tanks-server
+  CLIENT_APP_NAME: tanks-client
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            client/package-lock.json
+            server/package-lock.json
+
+      - name: Install and test client
+        working-directory: ./client
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Install and test server
+        working-directory: ./server
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Get deployment info
+        id: deploy-info
+        run: |
+          SERVER_URL=$(az containerapp show --name ${{ env.SERVER_APP_NAME }} -g ${{ env.AZURE_RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)
+          ACR_SERVER=$(az acr show --name ${{ env.ACR_NAME }} --query loginServer -o tsv)
+          echo "server_url=$SERVER_URL" >> $GITHUB_OUTPUT
+          echo "acr_server=$ACR_SERVER" >> $GITHUB_OUTPUT
+          echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Build and push server image
+        run: |
+          docker build -t ${{ steps.deploy-info.outputs.acr_server }}/tanks-server:${{ steps.deploy-info.outputs.image_tag }} ./server
+          docker build -t ${{ steps.deploy-info.outputs.acr_server }}/tanks-server:latest ./server
+          docker push ${{ steps.deploy-info.outputs.acr_server }}/tanks-server:${{ steps.deploy-info.outputs.image_tag }}
+          docker push ${{ steps.deploy-info.outputs.acr_server }}/tanks-server:latest
+
+      - name: Build and push client image
+        run: |
+          docker build \
+            -t ${{ steps.deploy-info.outputs.acr_server }}/tanks-client:${{ steps.deploy-info.outputs.image_tag }} \
+            -t ${{ steps.deploy-info.outputs.acr_server }}/tanks-client:latest \
+            --build-arg VITE_SERVER_URL=wss://${{ steps.deploy-info.outputs.server_url }} \
+            ./client
+          docker push ${{ steps.deploy-info.outputs.acr_server }}/tanks-client:${{ steps.deploy-info.outputs.image_tag }}
+          docker push ${{ steps.deploy-info.outputs.acr_server }}/tanks-client:latest
+
+      - name: Deploy server to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.SERVER_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ steps.deploy-info.outputs.acr_server }}/tanks-server:${{ steps.deploy-info.outputs.image_tag }}
+
+      - name: Deploy client to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.CLIENT_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ steps.deploy-info.outputs.acr_server }}/tanks-client:${{ steps.deploy-info.outputs.image_tag }}
+
+      - name: Get deployment URLs
+        run: |
+          CLIENT_URL=$(az containerapp show --name ${{ env.CLIENT_APP_NAME }} -g ${{ env.AZURE_RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)
+          SERVER_URL=$(az containerapp show --name ${{ env.SERVER_APP_NAME }} -g ${{ env.AZURE_RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)
+          echo "## Deployment Complete! 🎮" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Game URL:** https://$CLIENT_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Server URL:** https://$SERVER_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** ${{ steps.deploy-info.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Logout from Azure
+        if: always()
+        run: az logout
